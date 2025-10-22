@@ -5,7 +5,9 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request
+from dotenv import load_dotenv 
 
+load_dotenv()
 app = Flask(__name__)
 
 CACHE_EXPIRY_HOURS = 1
