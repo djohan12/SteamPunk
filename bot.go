@@ -185,32 +185,44 @@ func handleSearch(s *discordgo.Session, m *discordgo.MessageCreate, args []strin
 
 	gameName := strings.Join(args, " ")
 	encodedGame := url.QueryEscape(gameName)
-	resp, err := http.Get(fmt.Sprintf("%s/search?game=%s", apiURL, encodedGame))
+	fullURL := fmt.Sprintf("%s/search?game=%s", apiURL, encodedGame)
+	fmt.Println("Calling API:", fullURL)
+
+	resp, err := http.Get(fullURL)
 	if err != nil {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Error calling API: %v", err))
+		msg := fmt.Sprintf("Error calling API: %v", err)
+		fmt.Println(msg)
+		s.ChannelMessageSend(m.ChannelID, msg)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("API error: %s", string(body)))
+		msg := fmt.Sprintf("API error (status %d): %s", resp.StatusCode, string(body))
+		fmt.Println(msg)
+		s.ChannelMessageSend(m.ChannelID, msg)
 		return
 	}
 
 	var result SearchResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Error parsing JSON: %v", err))
+		msg := fmt.Sprintf("Error parsing JSON: %v", err)
+		fmt.Println(msg)
+		s.ChannelMessageSend(m.ChannelID, msg)
 		return
 	}
 
 	if len(result.Users) == 0 {
-		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("No users found for **%s**", gameName))
+		msg := fmt.Sprintf("No users found for **%s**", gameName)
+		fmt.Println(msg)
+		s.ChannelMessageSend(m.ChannelID, msg)
 		return
 	}
 
 	sendPaginatedEmbed(s, m.ChannelID, gameName, result.ImgIconURL, result.HeaderURL, result.Users, "search", 0)
 }
+
 
 
 func sendPaginatedEmbed(s *discordgo.Session, channelID, title, thumb, image string, players []Player, prefix string, page int) {
