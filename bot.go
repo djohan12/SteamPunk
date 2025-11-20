@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-	"net/url"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
@@ -26,7 +25,7 @@ type Player struct {
 	Username   string `json:"username"`
 	ProfileURL string `json:"profile_url"`
 	Playtime   int    `json:"playtime"`
-	HeaderURL  string `json:"header_url"` // Added to hold header image
+	HeaderURL  string `json:"header_url"`
 }
 
 type SearchResult struct {
@@ -247,7 +246,7 @@ func sendPaginatedEmbed(s *discordgo.Session, channelID, title, thumb string, pl
 
 	imageURL := ""
 	if len(players[start:end]) > 0 {
-		imageURL = players[start].HeaderURL // first game's header
+		imageURL = players[start].HeaderURL
 	}
 
 	embed := &discordgo.MessageEmbed{
@@ -264,13 +263,13 @@ func sendPaginatedEmbed(s *discordgo.Session, channelID, title, thumb string, pl
 			discordgo.Button{
 				Label:    "◀ Previous",
 				Style:    discordgo.PrimaryButton,
-				CustomID: fmt.Sprintf("%s|prev|%s|%d", prefix, strings.ReplaceAll(title, "|", ""), page),
+				CustomID: fmt.Sprintf("%s|prev|%s|%d", prefix, url.QueryEscape(title), page),
 				Disabled: page == 0,
 			},
 			discordgo.Button{
 				Label:    "Next ▶",
 				Style:    discordgo.PrimaryButton,
-				CustomID: fmt.Sprintf("%s|next|%s|%d", prefix, strings.ReplaceAll(title, "|", ""), page),
+				CustomID: fmt.Sprintf("%s|next|%s|%d", prefix, url.QueryEscape(title), page),
 				Disabled: page >= totalPages-1,
 			},
 		},
@@ -326,13 +325,13 @@ func editPaginatedEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, ti
 			discordgo.Button{
 				Label:    "◀ Previous",
 				Style:    discordgo.PrimaryButton,
-				CustomID: fmt.Sprintf("%s|prev|%s|%d", prefix, strings.ReplaceAll(title, "|", ""), page),
+				CustomID: fmt.Sprintf("%s|prev|%s|%d", prefix, url.QueryEscape(title), page),
 				Disabled: page == 0,
 			},
 			discordgo.Button{
 				Label:    "Next ▶",
 				Style:    discordgo.PrimaryButton,
-				CustomID: fmt.Sprintf("%s|next|%s|%d", prefix, strings.ReplaceAll(title, "|", ""), page),
+				CustomID: fmt.Sprintf("%s|next|%s|%d", prefix, url.QueryEscape(title), page),
 				Disabled: page >= totalPages-1,
 			},
 		},
@@ -359,8 +358,9 @@ func interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	prefix, action, title := parts[0], parts[1], parts[2]
+	prefix, action, encodedTitle := parts[0], parts[1], parts[2]
 	page, _ := strconv.Atoi(parts[3])
+	title, _ := url.QueryUnescape(encodedTitle)
 
 	var players []Player
 	var thumb string
@@ -395,7 +395,7 @@ func interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 
 	case "search":
-		apiResp, err := http.Get(fmt.Sprintf("%s/search?game=%s", apiURL, title))
+		apiResp, err := http.Get(fmt.Sprintf("%s/search?game=%s", apiURL, url.QueryEscape(title)))
 		if err != nil || apiResp.StatusCode != 200 {
 			fmt.Println("Error fetching search for pagination")
 			return
