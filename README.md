@@ -1,14 +1,15 @@
 # SteamPunk
 The "Go"-to Discord bot to see what all your friends play
 
-## How to Use
+## How to Run
 
-Make sure your Steam Account is set to public
+`python3 backend.py` Runs the Flask Application so that the bot can make API calls to get user data
 
-<img width="1438" height="714" alt="Screenshot 2025-11-20 at 11 09 32 AM" src="https://github.com/user-attachments/assets/067d6a25-7aa5-4038-9033-9c9d344eee5c" />
+`go run bot.go` Runs the actual bot in Discord (See commands for how to use it in a server)
 
+`./start.sh` You can also run this bash script to run both the API backend and bot frontend in one line
 
-### Commands
+## Commands
 
 `!ping`: See if the bot is currently online
 
@@ -24,3 +25,11 @@ Make sure your Steam Account is set to public
 `!search <game name>`: See what other users are playing a certain game
 
 <img width="546" height="526" alt="Screenshot 2025-11-20 at 11 07 08 AM" src="https://github.com/user-attachments/assets/4a898bf2-ed1d-4653-a3f4-d56b16cd1074" />
+
+## Troubleshooting
+
+If you are unable to read user data, make sure the account is made public on Steam
+
+<img width="1438" height="714" alt="Screenshot 2025-11-20 at 11 09 32 AM" src="https://github.com/user-attachments/assets/067d6a25-7aa5-4038-9033-9c9d344eee5c" />
+
+If the bot isn't running in the VGC server, let a member of the VGC board know and we'll get it up and running promptly
