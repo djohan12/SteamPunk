@@ -26,6 +26,7 @@ type Player struct {
 	Username   string `json:"username"`
 	ProfileURL string `json:"profile_url"`
 	Playtime   int    `json:"playtime"`
+	HeaderURL  string `json:"header_url"` // Added to hold header image
 }
 
 type SearchResult struct {
@@ -153,8 +154,8 @@ func handleGames(s *discordgo.Session, m *discordgo.MessageCreate, args []string
 	}
 
 	var account struct {
-		ProfileURL string                  `json:"profile_url"`
-		AvatarURL  string                  `json:"avatar_url"`
+		ProfileURL string                            `json:"profile_url"`
+		AvatarURL  string                            `json:"avatar_url"`
 		Games      map[string]map[string]interface{} `json:"games"`
 	}
 	if err := json.NewDecoder(apiResp.Body).Decode(&account); err != nil {
@@ -165,16 +166,21 @@ func handleGames(s *discordgo.Session, m *discordgo.MessageCreate, args []string
 	players := []Player{}
 	for name, g := range account.Games {
 		playtime := int(g["playtime_forever"].(float64)) / 60
+		headerURL := ""
+		if v, ok := g["header_url"].(string); ok {
+			headerURL = v
+		}
 		players = append(players, Player{
 			Username:   name,
 			ProfileURL: g["store_url"].(string),
 			Playtime:   playtime,
+			HeaderURL:  headerURL,
 		})
 	}
 
 	sort.Slice(players, func(i, j int) bool { return players[i].Playtime > players[j].Playtime })
 
-	sendPaginatedEmbed(s, m.ChannelID, username, account.AvatarURL, "", players, "games", 0)
+	sendPaginatedEmbed(s, m.ChannelID, username, account.AvatarURL, players, "games", 0)
 }
 
 func handleSearch(s *discordgo.Session, m *discordgo.MessageCreate, args []string) {
@@ -186,46 +192,35 @@ func handleSearch(s *discordgo.Session, m *discordgo.MessageCreate, args []strin
 	gameName := strings.Join(args, " ")
 	encodedGame := url.QueryEscape(gameName)
 	fullURL := fmt.Sprintf("%s/search?game=%s", apiURL, encodedGame)
-	fmt.Println("Calling API:", fullURL)
 
 	resp, err := http.Get(fullURL)
 	if err != nil {
-		msg := fmt.Sprintf("Error calling API: %v", err)
-		fmt.Println(msg)
-		s.ChannelMessageSend(m.ChannelID, msg)
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Error calling API: %v", err))
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		msg := fmt.Sprintf("API error (status %d): %s", resp.StatusCode, string(body))
-		fmt.Println(msg)
-		s.ChannelMessageSend(m.ChannelID, msg)
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("API error (status %d): %s", resp.StatusCode, string(body)))
 		return
 	}
 
 	var result SearchResult
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		msg := fmt.Sprintf("Error parsing JSON: %v", err)
-		fmt.Println(msg)
-		s.ChannelMessageSend(m.ChannelID, msg)
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("Error parsing JSON: %v", err))
 		return
 	}
 
 	if len(result.Users) == 0 {
-		msg := fmt.Sprintf("No users found for **%s**", gameName)
-		fmt.Println(msg)
-		s.ChannelMessageSend(m.ChannelID, msg)
+		s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("No users found for **%s**", gameName))
 		return
 	}
 
-	sendPaginatedEmbed(s, m.ChannelID, gameName, result.ImgIconURL, result.HeaderURL, result.Users, "search", 0)
+	sendPaginatedEmbed(s, m.ChannelID, gameName, result.ImgIconURL, result.Users, "search", 0)
 }
 
-
-
-func sendPaginatedEmbed(s *discordgo.Session, channelID, title, thumb, image string, players []Player, prefix string, page int) {
+func sendPaginatedEmbed(s *discordgo.Session, channelID, title, thumb string, players []Player, prefix string, page int) {
 	totalPages := (len(players) + pageSize - 1) / pageSize
 	if page < 0 {
 		page = 0
@@ -250,12 +245,17 @@ func sendPaginatedEmbed(s *discordgo.Session, channelID, title, thumb, image str
 		sb.WriteString(fmt.Sprintf("[**%s**](%s) — %s\n", p.Username, p.ProfileURL, playtimeMsg))
 	}
 
+	imageURL := ""
+	if len(players[start:end]) > 0 {
+		imageURL = players[start].HeaderURL // first game's header
+	}
+
 	embed := &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("%s — Page %d/%d", title, page+1, totalPages),
 		Description: sb.String(),
 		Color:       0x33ccbb,
 		Thumbnail:   &discordgo.MessageEmbedThumbnail{URL: thumb},
-		Image:       &discordgo.MessageEmbedImage{URL: image},
+		Image:       &discordgo.MessageEmbedImage{URL: imageURL},
 		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Total items: %d", len(players))},
 	}
 
@@ -282,6 +282,71 @@ func sendPaginatedEmbed(s *discordgo.Session, channelID, title, thumb, image str
 	})
 }
 
+func editPaginatedEmbed(s *discordgo.Session, i *discordgo.InteractionCreate, title, thumb string, players []Player, prefix string, page int) {
+	totalPages := (len(players) + pageSize - 1) / pageSize
+	if page < 0 {
+		page = 0
+	} else if page >= totalPages {
+		page = totalPages - 1
+	}
+
+	start := page * pageSize
+	end := start + pageSize
+	if end > len(players) {
+		end = len(players)
+	}
+
+	var sb strings.Builder
+	for _, p := range players[start:end] {
+		playtimeMsg := "Less than one hour"
+		if p.Playtime == 1 {
+			playtimeMsg = "1 hour"
+		} else if p.Playtime > 1 {
+			playtimeMsg = fmt.Sprintf("%d hours", p.Playtime)
+		}
+		sb.WriteString(fmt.Sprintf("[**%s**](%s) — %s\n", p.Username, p.ProfileURL, playtimeMsg))
+	}
+
+	imageURL := ""
+	if len(players[start:end]) > 0 {
+		imageURL = players[start].HeaderURL
+	}
+
+	embed := &discordgo.MessageEmbed{
+		Title:       fmt.Sprintf("%s — Page %d/%d", title, page+1, totalPages),
+		Description: sb.String(),
+		Color:       0x33ccbb,
+		Thumbnail:   &discordgo.MessageEmbedThumbnail{URL: thumb},
+		Image:       &discordgo.MessageEmbedImage{URL: imageURL},
+		Footer:      &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("Total items: %d", len(players))},
+	}
+
+	row := discordgo.ActionsRow{
+		Components: []discordgo.MessageComponent{
+			discordgo.Button{
+				Label:    "◀ Previous",
+				Style:    discordgo.PrimaryButton,
+				CustomID: fmt.Sprintf("%s|prev|%s|%d", prefix, strings.ReplaceAll(title, "|", ""), page),
+				Disabled: page == 0,
+			},
+			discordgo.Button{
+				Label:    "Next ▶",
+				Style:    discordgo.PrimaryButton,
+				CustomID: fmt.Sprintf("%s|next|%s|%d", prefix, strings.ReplaceAll(title, "|", ""), page),
+				Disabled: page >= totalPages-1,
+			},
+		},
+	}
+
+	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseUpdateMessage,
+		Data: &discordgo.InteractionResponseData{
+			Embeds:     []*discordgo.MessageEmbed{embed},
+			Components: []discordgo.MessageComponent{row},
+		},
+	})
+}
+
 func interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if i.Type != discordgo.InteractionMessageComponent {
 		return
@@ -298,7 +363,7 @@ func interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	page, _ := strconv.Atoi(parts[3])
 
 	var players []Player
-	var thumb, image string
+	var thumb string
 
 	switch prefix {
 	case "games":
@@ -310,19 +375,25 @@ func interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		defer apiResp.Body.Close()
 
 		var account struct {
-			AvatarURL string                  `json:"avatar_url"`
+			AvatarURL string                            `json:"avatar_url"`
 			Games     map[string]map[string]interface{} `json:"games"`
 		}
 		json.NewDecoder(apiResp.Body).Decode(&account)
 		thumb = account.AvatarURL
 		for name, g := range account.Games {
 			playtime := int(g["playtime_forever"].(float64)) / 60
+			headerURL := ""
+			if v, ok := g["header_url"].(string); ok {
+				headerURL = v
+			}
 			players = append(players, Player{
 				Username:   name,
 				ProfileURL: g["store_url"].(string),
 				Playtime:   playtime,
+				HeaderURL:  headerURL,
 			})
 		}
+
 	case "search":
 		apiResp, err := http.Get(fmt.Sprintf("%s/search?game=%s", apiURL, title))
 		if err != nil || apiResp.StatusCode != 200 {
@@ -330,25 +401,20 @@ func interactionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			return
 		}
 		defer apiResp.Body.Close()
+
 		var result SearchResult
 		json.NewDecoder(apiResp.Body).Decode(&result)
 		players = result.Users
 		thumb = result.ImgIconURL
-		image = result.HeaderURL
-	default:
-		return
 	}
 
 	sort.Slice(players, func(i, j int) bool { return players[i].Playtime > players[j].Playtime })
 
-	if action == "next" && page < (len(players)+pageSize-1)/pageSize-1 {
+	if action == "next" {
 		page++
-	} else if action == "prev" && page > 0 {
+	} else if action == "prev" {
 		page--
 	}
 
-	sendPaginatedEmbed(s, i.ChannelID, title, thumb, image, players, prefix, page)
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseDeferredMessageUpdate,
-	})
+	editPaginatedEmbed(s, i, title, thumb, players, prefix, page)
 }
